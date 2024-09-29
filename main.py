@@ -1,183 +1,192 @@
-import sys
-import configparser
-import logging
-import requests
-from PyQt5.QtWidgets import (QApplication, QWidget, QVBoxLayout, QLineEdit,
-                             QPushButton, QLabel, QToolTip, QMessageBox, QHBoxLayout)
-from PyQt5.QtGui import QIcon, QFont, QPixmap
-from PyQt5.QtCore import Qt
+from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QLineEdit, QPushButton, QLabel, QColorDialog, QFontDialog, QInputDialog, QMessageBox, QShortcut, QCheckBox, QDialog, QHBoxLayout
+from PyQt5.QtGui import QKeySequence
+from PyQt5 import QtCore
+from admin_panel import AdminPanel
+import re
+import platform
+import psutil  # Убедитесь, что psutil установлен
 
-# Настройка логгирования
-logging.basicConfig(filename='password_change.log', level=logging.INFO)
+class PasswordHistoryDialog(QDialog):
+    def __init__(self, previous_passwords):
+        super().__init__()
+        self.setWindowTitle("История паролей")
+        self.setGeometry(100, 100, 300, 200)
 
-class PasswordChanger(QWidget):
+        layout = QVBoxLayout()
+
+        self.label = QLabel("Ранее использованные пароли:")
+        layout.addWidget(self.label)
+
+        for password in previous_passwords:
+            layout.addWidget(QLabel(password))
+
+        self.setLayout(layout)
+
+class MainWindow(QWidget):
     def __init__(self):
         super().__init__()
-
-        # Загрузка сохраненного логина из конфигурации
-        self.config = configparser.ConfigParser()
-        self.config.read('config.ini')
-
+        self.setWindowTitle("Смена пароля")
+        self.setGeometry(100, 100, 400, 300)
+        self.password_visible = False
+        self.auto_resize_enabled = True
+        self.previous_passwords = []  # Список для хранения ранее использованных паролей
+        self.check_system_resources()  # Проверка системных ресурсов
         self.initUI()
+        self.setStyle()
 
     def initUI(self):
-        self.setWindowTitle('Смена пароля')
-        self.setFixedSize(550, 300)
-        self.setWindowIcon(QIcon('ChangePass\\assets\\icon.png'))  # Иконка приложения
+        layout = QVBoxLayout()
 
-        # Основной layout
-        main_layout = QVBoxLayout()
+        self.label_login = QLabel("Логин:")
+        layout.addWidget(self.label_login)
 
-        # Создание и стилизация виджетов
-        self.login_label = QLabel('Логин:')
-        self.login_label.setFont(QFont('Arial', 12))
-        self.login_icon = QLabel()
-        self.login_icon.setPixmap(QPixmap('ChangePass\\assets\\login_icon.png').scaled(16, 16))
-        self.login_icon.setToolTip('Введите ваш логин, пример: "sp\\ivanov"')
-        self.login_input = QLineEdit()
-        self.login_input.setPlaceholderText('логин')
-        self.login_input.setText(self.config.get('User', 'login', fallback=''))
-        self.login_input.setFont(QFont('Arial', 12))
+        self.input_login = QLineEdit()
+        layout.addWidget(self.input_login)
 
-        self.old_password_label = QLabel('Старый пароль:')
-        self.old_password_label.setFont(QFont('Arial', 12))
-        self.old_password_icon = QLabel()
-        self.old_password_icon.setPixmap(QPixmap('ChangePass\\assets\\old_password_icon.png').scaled(16, 16))
-        self.old_password_icon.setToolTip('Введите ваш старый пароль')
-        self.old_password_input = QLineEdit()
-        self.old_password_input.setEchoMode(QLineEdit.Password)
-        self.old_password_input.setFont(QFont('Arial', 12))
+        self.label_old_password = QLabel("Старый пароль:")
+        layout.addWidget(self.label_old_password)
 
-        self.new_password_label = QLabel('Новый пароль:')
-        self.new_password_label.setFont(QFont('Arial', 12))
-        self.new_password_icon = QLabel()
-        self.new_password_icon.setPixmap(QPixmap('ChangePass\\assets\\new_password_icon.png').scaled(16, 16))
-        self.new_password_icon.setToolTip('Введите новый пароль.')
-        self.new_password_input = QLineEdit()
-        self.new_password_input.setEchoMode(QLineEdit.Password)
-        self.new_password_input.setFont(QFont('Arial', 12))
+        self.input_old_password = QLineEdit()
+        self.input_old_password.setEchoMode(QLineEdit.Password)
+        layout.addWidget(self.input_old_password)
 
-        self.confirm_password_label = QLabel('Подтверждение нового пароля:')
-        self.confirm_password_label.setFont(QFont('Arial', 12))
-        self.confirm_password_icon = QLabel()
-        self.confirm_password_icon.setPixmap(QPixmap('ChangePass\\assets\\confirm_password_icon.png').scaled(16, 16))
-        self.confirm_password_icon.setToolTip('Подтвердите новый пароль')
-        self.confirm_password_input = QLineEdit()
-        self.confirm_password_input.setEchoMode(QLineEdit.Password)
-        self.confirm_password_input.setFont(QFont('Arial', 12))
+        self.label_new_password = QLabel("Новый пароль:")
+        layout.addWidget(self.label_new_password)
 
-        # Кнопки с иконками
-        self.submit_btn = QPushButton('Отправить')
-        self.submit_btn.setIcon(QIcon('ChangePass\\assets\\submit_icon.png'))
-        self.submit_btn.setFont(QFont('Arial', 12))
-        self.submit_btn.clicked.connect(self.change_password)
+        self.input_new_password = QLineEdit()
+        self.input_new_password.setEchoMode(QLineEdit.Password)
+        layout.addWidget(self.input_new_password)
 
-        self.cancel_btn = QPushButton('Отмена')
-        self.cancel_btn.setIcon(QIcon('ChangePass\\assets\\cancel_icon.png'))
-        self.cancel_btn.setFont(QFont('Arial', 12))
-        self.cancel_btn.clicked.connect(self.close)
+        self.label_confirm_password = QLabel("Подтверждение нового пароля:")
+        layout.addWidget(self.label_confirm_password)
 
-        # Лэйауты для размещения виджетов
-        def create_field_layout(label, icon, input_field):
-            layout = QHBoxLayout()
-            layout.addWidget(label)
-            layout.addWidget(icon)
-            layout.addWidget(input_field)
-            return layout
+        self.input_confirm_password = QLineEdit()
+        self.input_confirm_password.setEchoMode(QLineEdit.Password)
+        layout.addWidget(self.input_confirm_password)
 
-        main_layout.addLayout(create_field_layout(self.login_label, self.login_icon, self.login_input))
-        main_layout.addLayout(create_field_layout(self.old_password_label, self.old_password_icon, self.old_password_input))
-        main_layout.addLayout(create_field_layout(self.new_password_label, self.new_password_icon, self.new_password_input))
-        main_layout.addLayout(create_field_layout(self.confirm_password_label, self.confirm_password_icon, self.confirm_password_input))
+        # Общий флажок для отображения паролей
+        self.show_passwords_checkbox = QCheckBox("Показать пароли")
+        self.show_passwords_checkbox.stateChanged.connect(self.toggle_all_passwords_visibility)
+        layout.addWidget(self.show_passwords_checkbox)
 
-        btn_layout = QHBoxLayout()
-        btn_layout.addWidget(self.submit_btn)
-        btn_layout.addWidget(self.cancel_btn)
-        main_layout.addLayout(btn_layout)
+        # Кнопка для просмотра истории паролей
+        self.history_button = QPushButton("История паролей")
+        self.history_button.clicked.connect(self.show_password_history)
+        layout.addWidget(self.history_button)
 
-        self.setLayout(main_layout)
+        self.submit_button = QPushButton("Изменить пароль")
+        self.submit_button.clicked.connect(self.change_password)
+        layout.addWidget(self.submit_button)
 
-        # Стилизация
-        self.setStyleSheet("""
+        self.cancel_button = QPushButton("Отмена")
+        self.cancel_button.clicked.connect(self.close)
+        layout.addWidget(self.cancel_button)
+
+        self.setLayout(layout)
+
+        self.setShortcut()
+
+    def setShortcut(self):
+        shortcut = QShortcut(QKeySequence("Ctrl+Shift+A"), self)
+        shortcut.activated.connect(self.open_admin_panel)
+
+    def open_admin_panel(self):
+        self.admin_panel = AdminPanel(self)
+        self.admin_panel.exec_()
+
+    def toggle_all_passwords_visibility(self, state):
+        if state == QtCore.Qt.Checked:
+            self.input_old_password.setEchoMode(QLineEdit.Normal)
+            self.input_new_password.setEchoMode(QLineEdit.Normal)
+            self.input_confirm_password.setEchoMode(QLineEdit.Normal)
+        else:
+            self.input_old_password.setEchoMode(QLineEdit.Password)
+            self.input_new_password.setEchoMode(QLineEdit.Password)
+            self.input_confirm_password.setEchoMode(QLineEdit.Password)
+
+    def change_password(self):
+        old_password = self.input_old_password.text()
+        new_password = self.input_new_password.text()
+        confirm_password = self.input_confirm_password.text()
+
+        # Проверка на длину пароля и его сложность
+        if len(new_password) < 8:
+            QMessageBox.warning(self, "Ошибка", "Пароль должен содержать минимум 8 символов.")
+            return
+        if not re.search(r"[A-Z]", new_password):
+            QMessageBox.warning(self, "Ошибка", "Пароль должен содержать хотя бы одну заглавную букву.")
+            return
+        if not re.search(r"[a-z]", new_password):
+            QMessageBox.warning(self, "Ошибка", "Пароль должен содержать хотя бы одну строчную букву.")
+            return
+        if not re.search(r"[0-9]", new_password):
+            QMessageBox.warning(self, "Ошибка", "Пароль должен содержать хотя бы одну цифру.")
+            return
+        if not re.search(r"[!@#$%^&*(),.?\":{}|<>]", new_password):
+            QMessageBox.warning(self, "Предупреждение", "Рекомендуется использовать специальные символы для повышения безопасности.")
+
+        # Проверка на совпадение с предыдущими паролями
+        if new_password in self.previous_passwords:
+            QMessageBox.warning(self, "Ошибка", "Пароль уже использовался ранее. Пожалуйста, выберите другой.")
+            return
+
+        if new_password == confirm_password:
+            self.previous_passwords.append(new_password)  # Сохраняем новый пароль
+            QMessageBox.information(self, "Успех", "Пароль успешно изменен.")
+            # Здесь можно добавить логику для обновления пароля в системе
+        else:
+            QMessageBox.warning(self, "Ошибка", "Пароли не совпадают.")
+
+    def show_password_history(self):
+        history_dialog = PasswordHistoryDialog(self.previous_passwords)
+        history_dialog.exec_()
+
+    def setStyle(self):
+        self.setStyleSheet(""" 
             QWidget {
-                background-color: #f0f0f0;
+                background-color: #2e2e2e;
+                color: #ffffff;
+                font-family: Arial, sans-serif;
             }
             QLabel {
-                color: #333;
+                font-size: 14px;
             }
             QLineEdit {
-                padding: 5px;
-                border: 1px solid #ccc;
-                border-radius: 5px;
+                background-color: #3e3e3e;
+                border: 1px solid #0078d7;
+                border-radius: 4px;
+                padding: 10px;
+                font-size: 14px;
+                color: #ffffff;
             }
             QPushButton {
-                padding: 10px;
+                background-color: #0078d7;
+                color: #ffffff;
                 border: none;
-                border-radius: 5px;
-                background-color: #5cb85c;
-                color: white;
+                border-radius: 4px;
+                padding: 10px;
+                font-size: 14px;
             }
-            QPushButton:pressed {
-                background-color: #4cae4c;
-            }
-            QPushButton#cancel_btn {
-                background-color: #d9534f;
-            }
-            QPushButton#cancel_btn:pressed {
-                background-color: #c9302c;
+            QPushButton:hover {
+                background-color: #0056a3;
             }
         """)
 
-    def change_password(self):
-        login = self.login_input.text()
-        old_password = self.old_password_input.text()
-        new_password = self.new_password_input.text()
-        confirm_password = self.confirm_password_input.text()
+    def check_system_resources(self):
+        # Проверка минимальных системных ресурсов
+        memory_info = psutil.virtual_memory()
+        cpu_count = psutil.cpu_count()
 
-        if new_password != confirm_password:
-            QMessageBox.warning(self, 'Ошибка', 'Новый пароль и подтверждение не совпадают')
-            return
+        # Проверка на достаточное количество оперативной памяти
+        if memory_info.available < 2 * 1024 * 1024 * 1024:  # Меньше 2 ГБ
+            QMessageBox.warning(self, "Предупреждение", "Доступно недостаточно оперативной памяти. Некоторые функции могут быть ограничены.")
+        
+        # Проверка на количество ядер CPU
+        if cpu_count < 2:
+            QMessageBox.warning(self, "Предупреждение", "Обратите внимание, что на вашем устройстве недостаточно процессорных ядер для оптимальной работы.")
 
-        # Сохранение логина в конфигурационный файл
-        self.config['User'] = {'login': login}
-        with open('config.ini', 'w') as configfile:
-            self.config.write(configfile)
-
-        # Логгирование попытки смены пароля
-        logging.info(f'Попытка смены пароля для пользователя {login}')
-
-        try:
-            self.send_password_change_request(login, old_password, new_password)
-            QMessageBox.information(self, 'Успех', 'Пароль успешно изменен')
-        except Exception as e:
-            QMessageBox.critical(self, 'Ошибка', f'Не удалось изменить пароль: {e}')
-
-    def send_password_change_request(self, login, old_password, new_password):
-        session = requests.Session()
-        # Загрузка страницы для получения cookies
-        url = 'https://change.snackprod.com/RDWeb/Pages/ua-UA/password.aspx'
-        session.get(url)
-
-        # Подготовка данных для отправки
-        payload = {
-            'DomainUserName': f'sp\\{login}',
-            'UserPass': old_password,
-            'NewUserPass': new_password,
-            'ConfirmNewUserPass': new_password
-        }
-        headers = {
-            'Content-Type': 'application/x-www-form-urlencoded'
-        }
-
-        response = session.post(url, data=payload, headers=headers)
-
-        if response.status_code != 200:
-            logging.error(f'Ошибка при смене пароля: {response.text}')
-            raise Exception('Ошибка при смене пароля')
-
-# Основной запуск приложения
 if __name__ == '__main__':
-    app = QApplication(sys.argv)
-    ex = PasswordChanger()
-    ex.show()  # Убедитесь, что вызов show() происходит здесь
-    sys.exit(app.exec_())
+    app = QApplication([])
+    window = MainWindow()
+    window.show()
+    app.exec_()
