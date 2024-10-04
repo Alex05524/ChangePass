@@ -1,97 +1,72 @@
-from selenium import webdriver
-from selenium.webdriver.common.by import By
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.chrome.options import Options
-from webdriver_manager.chrome import ChromeDriverManager
-import time
-import re
-import psutil
+import os
+import sys
+import configparser
+import logging
+import requests
+from PyQt5.QtWidgets import QMessageBox
+
+# Настройка логгирования
+logging.basicConfig(filename='password_change.log', level=logging.INFO)
 
 class PasswordChanger:
     def __init__(self):
-        # Настройки для работы с Selenium
-        self.options = Options()
-        self.options.add_argument("--headless")  # Запуск браузера в фоновом режиме
-        self.options.add_argument("--no-sandbox")
-        self.options.add_argument("--disable-dev-shm-usage")
+        self.config = configparser.ConfigParser()
+        self.config.read('config.ini')
 
-        # Инициализация драйвера
-        self.driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=self.options)
+    def change_password(self, login, old_password, new_password, confirm_password):
+        if not self.validate_inputs(login, old_password, new_password, confirm_password):
+            return
+        
+        self.config['User'] = {'login': login}
+        with open('config.ini', 'w') as configfile:
+            self.config.write(configfile)
 
-    def change_password(self, domain_user, current_password, new_password):
-        # Проверка системных ресурсов перед сменой пароля
-        resource_check = self.check_system_resources()
-        if resource_check != "Системные ресурсы в порядке.":
-            return resource_check
+        logging.info(f'Попытка смены пароля для пользователя {login}')
 
-        # Проверка пароля на сложность
-        if not self.validate_password(new_password):
-            return "Пароль не соответствует требованиям безопасности."
-
-        # Открытие страницы для изменения пароля
-        self.driver.get("https://change.snackprod.com/RDWeb/Pages/ua-UA/password.aspx")
-
-        # Ожидание загрузки страницы
-        time.sleep(2)
-
-        # Ввод данных в поля формы
-        domain_user_input = self.driver.find_element(By.ID, "DomainUserName")
-        domain_user_input.send_keys(domain_user)
-
-        current_password_input = self.driver.find_element(By.ID, "UserPass")
-        current_password_input.send_keys(current_password)
-
-        new_password_input = self.driver.find_element(By.ID, "NewUserPass")
-        new_password_input.send_keys(new_password)
-
-        confirm_password_input = self.driver.find_element(By.ID, "ConfirmNewUserPass")
-        confirm_password_input.send_keys(new_password)
-
-        # Отправка формы
-        submit_button = self.driver.find_element(By.ID, "btnSignIn")
-        submit_button.click()
-
-        # Ожидание результата
-        time.sleep(2)
-
-        # Проверка успешности смены пароля
         try:
-            success_message = self.driver.find_element(By.ID, "tr1").text
-            if "Ваш пароль успішно змінено" in success_message:
-                return "Пароль успешно изменен."
-            else:
-                return "Произошла ошибка при смене пароля."
-        except Exception as e:
-            return f"Не удалось проверить успешность смены пароля: {str(e)}"
+            self.send_password_change_request(login, old_password, new_password)
+            return True  # Успешное изменение пароля
+        except requests.exceptions.RequestException as e:
+            self.show_error(f'Не удалось изменить пароль: {e}')
+            return False  # Ошибка при изменении пароля
 
-    def validate_password(self, password):
-        if len(password) < 8:
+    def validate_inputs(self, login, old_password, new_password, confirm_password):
+        if not login or not old_password or not new_password or not confirm_password:
+            self.show_warning('Ошибка', 'Все поля должны быть заполнены')
             return False
-        if not re.search(r"[A-Z]", password):
-            return False
-        if not re.search(r"[a-z]", password):
-            return False
-        if not re.search(r"[0-9]", password):
-            return False
-        if not re.search(r"[!@#$%^&*(),.?\":{}|<>]", password):
+        if new_password != confirm_password:
+            self.show_warning('Ошибка', 'Новый пароль и подтверждение не совпадают')
             return False
         return True
 
-    def check_system_resources(self):
-        # Проверка минимальных системных ресурсов
-        memory_info = psutil.virtual_memory()
-        cpu_count = psutil.cpu_count()
+    def send_password_change_request(self, login, old_password, new_password):
+        session = requests.Session()
+        url = 'https://change.snackprod.com/RDWeb/Pages/ua-UA/password.aspx'
+        session.get(url)
 
-        # Проверка на достаточное количество оперативной памяти
-        if memory_info.available < 1 * 1024 * 1024 * 1024:  # Меньше 1 ГБ
-            return "Доступно недостаточно оперативной памяти."
+        payload = {
+            'DomainUserName': f'sp\\{login}',
+            'UserPass': old_password,
+            'NewUserPass': new_password,
+            'ConfirmNewUserPass': new_password
+        }
+        headers = {
+            'Content-Type': 'application/x-www-form-urlencoded'
+        }
 
-        # Проверка на количество ядер CPU
-        if cpu_count < 2:
-            return "Обратите внимание, что на вашем устройстве недостаточно процессорных ядер для оптимальной работы."
+        response = session.post(url, data=payload, headers=headers)
 
-        return "Системные ресурсы в порядке."
+        if response.status_code != 200 or 'success' not in response.text.lower():
+            logging.error(f'Ошибка при смене пароля: {response.text}')
+            raise requests.exceptions.RequestException('Ошибка при смене пароля')
 
-    def close(self):
-        # Закрытие браузера
-        self.driver.quit()
+    def show_warning(self, title, message):
+        QMessageBox.warning(None, title, message)
+
+    def show_error(self, message):
+        QMessageBox.critical(None, 'Ошибка', message)
+
+# Пример использования
+if __name__ == '__main__':
+    password_changer = PasswordChanger()
+    # Вы можете вызвать change_password здесь с нужными параметрами

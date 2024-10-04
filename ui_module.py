@@ -1,10 +1,13 @@
-from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QLineEdit, QPushButton, QLabel, QColorDialog, QFontDialog, QInputDialog, QMessageBox, QShortcut, QCheckBox, QDialog, QHBoxLayout
+from PyQt5.QtWidgets import (
+    QApplication, QWidget, QVBoxLayout, QLineEdit, QPushButton, QLabel,
+    QCheckBox, QDialog, QMessageBox, QShortcut
+)
 from PyQt5.QtGui import QKeySequence
 from PyQt5 import QtCore
 from admin_panel import AdminPanel
 import re
-import platform
-import psutil  # Убедитесь, что psutil установлен
+import psutil
+
 
 class PasswordHistoryDialog(QDialog):
     def __init__(self, previous_passwords):
@@ -13,129 +16,106 @@ class PasswordHistoryDialog(QDialog):
         self.setGeometry(100, 100, 300, 200)
 
         layout = QVBoxLayout()
-
-        self.label = QLabel("Ранее использованные пароли:")
-        layout.addWidget(self.label)
+        layout.addWidget(QLabel("Ранее использованные пароли:"))
 
         for password in previous_passwords:
             layout.addWidget(QLabel(password))
 
         self.setLayout(layout)
 
+
 class MainWindow(QWidget):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Смена пароля")
         self.setGeometry(100, 100, 400, 300)
-        self.password_visible = False
-        self.auto_resize_enabled = True
-        self.previous_passwords = []  # Список для хранения ранее использованных паролей
-        self.check_system_resources()  # Проверка системных ресурсов
+        self.previous_passwords = []
         self.initUI()
-        self.setStyle()
+        self.check_system_resources()
 
     def initUI(self):
         layout = QVBoxLayout()
 
-        self.label_login = QLabel("Логин:")
-        layout.addWidget(self.label_login)
+        self.input_login = self.create_labeled_input(layout, "Логин:")
+        self.input_old_password = self.create_labeled_input(layout, "Старый пароль:", True)
+        self.input_new_password = self.create_labeled_input(layout, "Новый пароль:", True)
+        self.input_confirm_password = self.create_labeled_input(layout, "Подтверждение нового пароля:", True)
 
-        self.input_login = QLineEdit()
-        layout.addWidget(self.input_login)
-
-        self.label_old_password = QLabel("Старый пароль:")
-        layout.addWidget(self.label_old_password)
-
-        self.input_old_password = QLineEdit()
-        self.input_old_password.setEchoMode(QLineEdit.Password)
-        layout.addWidget(self.input_old_password)
-
-        self.label_new_password = QLabel("Новый пароль:")
-        layout.addWidget(self.label_new_password)
-
-        self.input_new_password = QLineEdit()
-        self.input_new_password.setEchoMode(QLineEdit.Password)
-        layout.addWidget(self.input_new_password)
-
-        self.label_confirm_password = QLabel("Подтверждение нового пароля:")
-        layout.addWidget(self.label_confirm_password)
-
-        self.input_confirm_password = QLineEdit()
-        self.input_confirm_password.setEchoMode(QLineEdit.Password)
-        layout.addWidget(self.input_confirm_password)
-
-        # Общий флажок для отображения паролей
         self.show_passwords_checkbox = QCheckBox("Показать пароли")
-        self.show_passwords_checkbox.stateChanged.connect(self.toggle_all_passwords_visibility)
+        self.show_passwords_checkbox.stateChanged.connect(self.toggle_password_visibility)
         layout.addWidget(self.show_passwords_checkbox)
 
-        # Кнопка для просмотра истории паролей
-        self.history_button = QPushButton("История паролей")
-        self.history_button.clicked.connect(self.show_password_history)
-        layout.addWidget(self.history_button)
-
-        self.submit_button = QPushButton("Изменить пароль")
-        self.submit_button.clicked.connect(self.change_password)
-        layout.addWidget(self.submit_button)
-
-        self.cancel_button = QPushButton("Отмена")
-        self.cancel_button.clicked.connect(self.close)
-        layout.addWidget(self.cancel_button)
+        self.create_button(layout, "История паролей", self.show_password_history)
+        self.create_button(layout, "Изменить пароль", self.change_password)
+        self.create_button(layout, "Отмена", self.close)
 
         self.setLayout(layout)
+        self.setStyle()
+        self.set_shortcut()
 
-        self.setShortcut()
+    def create_labeled_input(self, layout, label_text, is_password=False):
+        layout.addWidget(QLabel(label_text))
+        input_field = QLineEdit()
+        if is_password:
+            input_field.setEchoMode(QLineEdit.Password)
+        layout.addWidget(input_field)
+        return input_field
 
-    def setShortcut(self):
+    def create_button(self, layout, button_text, callback):
+        button = QPushButton(button_text)
+        button.clicked.connect(callback)
+        layout.addWidget(button)
+
+    def set_shortcut(self):
         shortcut = QShortcut(QKeySequence("Ctrl+Shift+A"), self)
         shortcut.activated.connect(self.open_admin_panel)
 
     def open_admin_panel(self):
-        self.admin_panel = AdminPanel(self)
-        self.admin_panel.exec_()
+        admin_panel = AdminPanel(self)
+        admin_panel.exec_()
 
-    def toggle_all_passwords_visibility(self, state):
-        if state == QtCore.Qt.Checked:
-            self.input_old_password.setEchoMode(QLineEdit.Normal)
-            self.input_new_password.setEchoMode(QLineEdit.Normal)
-            self.input_confirm_password.setEchoMode(QLineEdit.Normal)
-        else:
-            self.input_old_password.setEchoMode(QLineEdit.Password)
-            self.input_new_password.setEchoMode(QLineEdit.Password)
-            self.input_confirm_password.setEchoMode(QLineEdit.Password)
+    def toggle_password_visibility(self, state):
+        echo_mode = QLineEdit.Normal if state == QtCore.Qt.Checked else QLineEdit.Password
+        self.input_old_password.setEchoMode(echo_mode)
+        self.input_new_password.setEchoMode(echo_mode)
+        self.input_confirm_password.setEchoMode(echo_mode)
 
     def change_password(self):
         old_password = self.input_old_password.text()
         new_password = self.input_new_password.text()
         confirm_password = self.input_confirm_password.text()
 
-        # Проверка на длину пароля и его сложность
-        if len(new_password) < 8:
-            QMessageBox.warning(self, "Ошибка", "Пароль должен содержать минимум 8 символов.")
-            return
-        if not re.search(r"[A-Z]", new_password):
-            QMessageBox.warning(self, "Ошибка", "Пароль должен содержать хотя бы одну заглавную букву.")
-            return
-        if not re.search(r"[a-z]", new_password):
-            QMessageBox.warning(self, "Ошибка", "Пароль должен содержать хотя бы одну строчную букву.")
-            return
-        if not re.search(r"[0-9]", new_password):
-            QMessageBox.warning(self, "Ошибка", "Пароль должен содержать хотя бы одну цифру.")
-            return
-        if not re.search(r"[!@#$%^&*(),.?\":{}|<>]", new_password):
-            QMessageBox.warning(self, "Предупреждение", "Рекомендуется использовать специальные символы для повышения безопасности.")
-
-        # Проверка на совпадение с предыдущими паролями
-        if new_password in self.previous_passwords:
-            QMessageBox.warning(self, "Ошибка", "Пароль уже использовался ранее. Пожалуйста, выберите другой.")
-            return
-
-        if new_password == confirm_password:
-            self.previous_passwords.append(new_password)  # Сохраняем новый пароль
+        if self.validate_new_password(new_password, confirm_password):
+            self.previous_passwords.append(new_password)
             QMessageBox.information(self, "Успех", "Пароль успешно изменен.")
             # Здесь можно добавить логику для обновления пароля в системе
-        else:
+
+    def validate_new_password(self, new_password, confirm_password):
+        if len(new_password) < 8:
+            QMessageBox.warning(self, "Ошибка", "Пароль должен содержать минимум 8 символов.")
+            return False
+
+        password_checks = [
+            (r"[A-Z]", "Пароль должен содержать хотя бы одну заглавную букву."),
+            (r"[a-z]", "Пароль должен содержать хотя бы одну строчную букву."),
+            (r"[0-9]", "Пароль должен содержать хотя бы одну цифру."),
+            (r"[!@#$%^&*(),.?\":{}|<>]", "Рекомендуется использовать специальные символы для повышения безопасности.")
+        ]
+
+        for pattern, message in password_checks:
+            if not re.search(pattern, new_password):
+                QMessageBox.warning(self, "Ошибка", message)
+                return False
+
+        if new_password in self.previous_passwords:
+            QMessageBox.warning(self, "Ошибка", "Пароль уже использовался ранее. Пожалуйста, выберите другой.")
+            return False
+
+        if new_password != confirm_password:
             QMessageBox.warning(self, "Ошибка", "Пароли не совпадают.")
+            return False
+
+        return True
 
     def show_password_history(self):
         history_dialog = PasswordHistoryDialog(self.previous_passwords)
@@ -173,17 +153,15 @@ class MainWindow(QWidget):
         """)
 
     def check_system_resources(self):
-        # Проверка минимальных системных ресурсов
         memory_info = psutil.virtual_memory()
         cpu_count = psutil.cpu_count()
 
-        # Проверка на достаточное количество оперативной памяти
         if memory_info.available < 2 * 1024 * 1024 * 1024:  # Меньше 2 ГБ
             QMessageBox.warning(self, "Предупреждение", "Доступно недостаточно оперативной памяти. Некоторые функции могут быть ограничены.")
-        
-        # Проверка на количество ядер CPU
+
         if cpu_count < 2:
             QMessageBox.warning(self, "Предупреждение", "Обратите внимание, что на вашем устройстве недостаточно процессорных ядер для оптимальной работы.")
+
 
 if __name__ == '__main__':
     app = QApplication([])

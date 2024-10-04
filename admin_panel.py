@@ -1,4 +1,4 @@
-from PyQt5.QtWidgets import QDialog, QLabel, QVBoxLayout, QPushButton, QColorDialog, QFontDialog, QInputDialog, QMessageBox, QCheckBox
+from PyQt5.QtWidgets import QDialog, QLabel, QVBoxLayout, QPushButton, QColorDialog, QFontDialog, QInputDialog, QMessageBox, QCheckBox, QStyleFactory
 from PyQt5 import QtCore
 
 class AdminPanel(QDialog):
@@ -7,7 +7,7 @@ class AdminPanel(QDialog):
         self.main_window = main_window
         self.setWindowTitle('Панель администратора')
         self.setFixedSize(400, 300)
-        self.setStyle()
+        self.set_default_style()
         self.initUI()
 
     def initUI(self):
@@ -33,55 +33,22 @@ class AdminPanel(QDialog):
         self.auto_resize_checkbox.stateChanged.connect(self.toggle_auto_resize)
         layout.addWidget(self.auto_resize_checkbox)
 
-        self.reset_btn = QPushButton('Сбросить настройки')
-        self.reset_btn.clicked.connect(self.reset_to_defaults)
-        layout.addWidget(self.reset_btn)
+        self.reset_defaults_btn = QPushButton('Сбросить настройки по умолчанию')
+        self.reset_defaults_btn.clicked.connect(self.reset_to_defaults)
+        layout.addWidget(self.reset_defaults_btn)
 
-        # Кнопка для сброса ранее использованных паролей
-        self.reset_passwords_btn = QPushButton('Сбросить ранее использованные пароли')
-        self.reset_passwords_btn.clicked.connect(self.reset_used_passwords)
-        layout.addWidget(self.reset_passwords_btn)
+        self.close_button = QPushButton('Закрыть')
+        self.close_button.clicked.connect(self.close)
+        layout.addWidget(self.close_button)
 
         self.setLayout(layout)
 
-    def change_background_color(self):
-        color = QColorDialog.getColor()
-        if color.isValid():
-            self.main_window.change_background_color(color.name())
-
-    def change_font(self):
-        font, ok = QFontDialog.getFont()
-        if ok:
-            self.main_window.change_font(font)
-
-    def change_interface_size(self):
-        new_size, ok = QInputDialog.getText(self, 'Изменить размер', 'Введите новый размер окна (ширина, высота):')
-        if ok and ',' in new_size:
-            try:
-                width, height = map(int, new_size.split(','))
-                self.main_window.resize_interface(width, height)
-            except ValueError:
-                QMessageBox.warning(self, "Ошибка", "Неверный формат размера. Пожалуйста, введите в формате: ширина, высота.")
-
-    def toggle_auto_resize(self, state):
-        self.main_window.toggle_auto_resize(state == QtCore.Qt.Checked)
-
-    def reset_to_defaults(self):
-        self.main_window.reset_to_defaults()
-
-    def reset_used_passwords(self):
-        self.main_window.previous_passwords.clear()
-        QMessageBox.information(self, "Успех", "Ранее использованные пароли были сброшены.")
-
-    def setStyle(self):
-        self.setStyleSheet("""
+    def set_default_style(self):
+        self.setStyleSheet(""" 
             QDialog {
                 background-color: #2e2e2e;
                 color: #ffffff;
                 font-family: Arial, sans-serif;
-            }
-            QLabel {
-                font-size: 14px;
             }
             QPushButton {
                 background-color: #0078d7;
@@ -94,7 +61,29 @@ class AdminPanel(QDialog):
             QPushButton:hover {
                 background-color: #0056a3;
             }
-            QCheckBox {
-                color: #ffffff;
-            }
         """)
+
+    def change_background_color(self):
+        color = QColorDialog.getColor()
+        if color.isValid():
+            self.main_window.setStyleSheet(f"QWidget {{ background-color: {color.name()}; }}")
+
+    def change_font(self):
+        font, ok = QFontDialog.getFont()
+        if ok:
+            self.main_window.setFont(font)
+
+    def change_interface_size(self):
+        width, ok1 = QInputDialog.getInt(self, 'Изменить размер', 'Ширина:', value=self.main_window.width(), min=100, max=1920)
+        height, ok2 = QInputDialog.getInt(self, 'Изменить размер', 'Высота:', value=self.main_window.height(), min=100, max=1080)
+        if ok1 and ok2:
+            self.main_window.resize(width, height)
+
+    def toggle_auto_resize(self, state):
+        self.main_window.auto_resize_enabled = (state == QtCore.Qt.Checked)
+
+    def reset_to_defaults(self):
+        self.main_window.auto_resize_enabled = True
+        self.auto_resize_checkbox.setChecked(True)
+        self.main_window.setStyleSheet("")  # Установите стиль по умолчанию, если нужно
+        QMessageBox.information(self, "Сброс", "Настройки сброшены к значениям по умолчанию.")
