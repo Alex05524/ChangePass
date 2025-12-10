@@ -1,72 +1,69 @@
-import os
-import sys
-import configparser
-import logging
-import requests
-from PyQt5.QtWidgets import QMessageBox
-
-# Настройка логгирования
-logging.basicConfig(filename='password_change.log', level=logging.INFO)
+import re
+from requests.exceptions import RequestException
+try:
+    import requests
+except ImportError:
+    requests = None
 
 class PasswordChanger:
-    def __init__(self):
-        self.config = configparser.ConfigParser()
-        self.config.read('config.ini')
+    def __init__(self, username, old_password, new_password):
+        self.username = username
+        self.old_password = old_password
+        self.new_password = new_password
+        self.session = None
 
-    def change_password(self, login, old_password, new_password, confirm_password):
-        if not self.validate_inputs(login, old_password, new_password, confirm_password):
-            return
-        
-        self.config['User'] = {'login': login}
-        with open('config.ini', 'w') as configfile:
-            self.config.write(configfile)
-
-        logging.info(f'Попытка смены пароля для пользователя {login}')
-
+    def change_password(self):
         try:
-            self.send_password_change_request(login, old_password, new_password)
-            return True  # Успешное изменение пароля
-        except requests.exceptions.RequestException as e:
-            self.show_error(f'Не удалось изменить пароль: {e}')
-            return False  # Ошибка при изменении пароля
+            import requests
+            from requests.exceptions import RequestException
+        except Exception:
+            return "Сетевая библиотека недоступна. Установите requests."
 
-    def validate_inputs(self, login, old_password, new_password, confirm_password):
-        if not login or not old_password or not new_password or not confirm_password:
-            self.show_warning('Ошибка', 'Все поля должны быть заполнены')
-            return False
-        if new_password != confirm_password:
-            self.show_warning('Ошибка', 'Новый пароль и подтверждение не совпадают')
-            return False
-        return True
+        if self.session is None:
+            self.session = requests.Session()
 
-    def send_password_change_request(self, login, old_password, new_password):
-        session = requests.Session()
-        url = 'https://change.snackprod.com/RDWeb/Pages/ua-UA/password.aspx'
-        session.get(url)
-
+        url = "https://change.snackprod.com/RDWeb/Pages/ua-UA/password.aspx"
         payload = {
-            'DomainUserName': f'sp\\{login}',
-            'UserPass': old_password,
-            'NewUserPass': new_password,
-            'ConfirmNewUserPass': new_password
+            'DomainUserName': self.username,
+            'UserPass': self.old_password,
+            'NewUserPass': self.new_password,
+            'ConfirmNewUserPass': self.new_password
         }
-        headers = {
-            'Content-Type': 'application/x-www-form-urlencoded'
-        }
+        try:
+            resp = self.session.post(url, data=payload, timeout=15)
+            if resp.status_code == 200:
+                return self.handle_response(resp.text)
+            return f"Ошибка запроса: код {resp.status_code}"
+        except RequestException as e:
+            return f"Ошибка сети: {e}"
 
-        response = session.post(url, data=payload, headers=headers)
+    def handle_response(self, html: str):
+        if "Ваш пароль успішно змінено." in html:
+            return "Пароль успешно изменён."
+        if "Введите новый пароль." in html:
+            return "Введите новый пароль."
+        if "Новий пароль не відповідає вимогам домену" in html or "Новий пароль не відповідає вимогам" in html:
+            return "Новый пароль не соответствует требованиям домена. Выберите другой."
+        if "Введені паролі не збігаються." in html:
+            return "Пароли не совпадают."
+        if "Ви ввели неприпустиме ім'я користувача або пароль" in html:
+            return "Неправильное имя пользователя или пароль. Повторите ввод."
+        if "Ваш пароль неможливо змінити. Зверніться за допомогою до адміністратора." in html:
+            return "Пароль невозможно изменить. Обратитесь к администратору."
+        if "Ошибка: не удалось отобразить веб-доступ к удаленным рабочим столам." in html:
+            return "Ошибка отображения страницы. Попробуйте позже или обратитесь к администратору."
 
-        if response.status_code != 200 or 'success' not in response.text.lower():
-            logging.error(f'Ошибка при смене пароля: {response.text}')
-            raise requests.exceptions.RequestException('Ошибка при смене пароля')
+        m = re.search(r'<span class="wrng">(.+?)</span>', html, re.S)
+        if m:
+            raw = m.group(1)
+            if "успішно змінено" in raw:
+                return "Пароль успешно изменён."
+            if "не відповідає вимогам" in raw:
+                return "Новый пароль не соответствует требованиям."
+            if "не збігаються" in raw:
+                return "Пароли не совпадают."
+            if "ім'я користувача або пароль" in raw or "ім\u0027я користувача або пароль" in raw:
+                return "Неправильное имя пользователя или пароль."
+            return raw
 
-    def show_warning(self, title, message):
-        QMessageBox.warning(None, title, message)
-
-    def show_error(self, message):
-        QMessageBox.critical(None, 'Ошибка', message)
-
-# Пример использования
-if __name__ == '__main__':
-    password_changer = PasswordChanger()
-    # Вы можете вызвать change_password здесь с нужными параметрами
+        return "Неизвестная ошибка при смене пароля."
